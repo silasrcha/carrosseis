@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="theme-color" content="#000000">
+<title>Carrossel Bio</title>
+<meta property="og:type" content="website">
+<meta property="og:title" content="Carrossel Bio">
+<meta property="og:description" content="14 slides">
+<meta property="og:image" content="https://silasrcha.github.io/carrosseis/carrossel-bio-1/01.png?v=7f98852e28c52990">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    background: #000;
+    overflow: hidden;
+    overscroll-behavior: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    font: 400 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #fff;
+  }
+
+  #vp {
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+    touch-action: none;
+    cursor: grab;
+  }
+  #vp.arrastando { cursor: grabbing; }
+
+  #track { display: flex; height: 100%; will-change: transform; }
+  .slide { flex: 0 0 100%; height: 100%; position: relative; overflow: hidden; }
+  .slide > img, .slide > video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;      /* o app recorta tudo na proporção do primeiro slide */
+    display: block;
+    -webkit-user-drag: none;
+    pointer-events: none;
+  }
+
+  #dots {
+    position: absolute;
+    left: 0; right: 0;
+    bottom: -26px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 5px;
+    opacity: 0;
+    transition: opacity .35s ease;
+    pointer-events: none;
+  }
+  #dots.visivel { opacity: 1; }
+  #dots span {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: rgba(255,255,255,.42);
+    transition: transform .2s ease, background .2s ease;
+  }
+  #dots span.ativo { background: #fff; }
+  #dots span.longe { transform: scale(.6); }
+  #dots span.fora { transform: scale(0); }
+
+  #som {
+    position: absolute;
+    right: 14px; bottom: 14px;
+    width: 34px; height: 34px;
+    border: 0; border-radius: 50%;
+    background: rgba(0,0,0,.55);
+    display: none;
+    place-items: center;
+    backdrop-filter: blur(6px);
+  }
+  #som.visivel { display: grid; }
+  #som svg { width: 17px; height: 17px; fill: none; stroke: #fff; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+
+  #aviso {
+    position: fixed; inset: 0;
+    display: grid; place-content: center; text-align: center; gap: 8px;
+    padding: 32px; color: #8A8A8A; font-size: 14px;
+  }
+  #aviso b { color: #fff; font-size: 15px; font-weight: 600; }
+  #aviso span { word-break: break-all; }
+
+  @media (prefers-reduced-motion: reduce) {
+    #track { transition-duration: 1ms !important; }
+  }
+</style>
+</head>
+<body>
+
+<div id="vp">
+  <div id="track"></div>
+  <div id="dots"></div>
+  <button id="som" aria-label="Ligar o som"></button>
+</div>
+
+<script>
+(() => {
+  const ITENS = [{"tipo": "imagem", "src": "01.png?v=7f98852e28c52990"}, {"tipo": "video", "src": "02.mp4?v=7f98852e28c52990", "poster": "02-capa.jpg?v=7f98852e28c52990"}, {"tipo": "imagem", "src": "03.png?v=7f98852e28c52990"}, {"tipo": "imagem", "src": "04.png?v=7f98852e28c52990"}, {"tipo": "imagem", "src": "05.png?v=7f98852e28c52990"}, {"tipo": "imagem", "src": "06.png?v=7f98852e28c52990"}, {"tipo": "video", "src": "07.mp4?v=7f98852e28c52990", "poster": "07-capa.jpg?v=7f98852e28c52990"}, {"tipo": "imagem", "src": "08.png?v=7f98852e28c52990"}, {"tipo": "imagem", "src": "09.png?v=7f98852e28c52990"}, {"tipo": "imagem", "src": "10.png?v=7f98852e28c52990"}, {"tipo": "imagem", "src": "11.png?v=7f98852e28c52990"}, {"tipo": "imagem", "src": "12.png?v=7f98852e28c52990"}, {"tipo": "imagem", "src": "13.png?v=7f98852e28c52990"}, {"tipo": "imagem", "src": "14.png?v=7f98852e28c52990"}];
+  const PROPORCAO_FIXA = null;
+
+  const vp = document.getElementById('vp');
+  const track = document.getElementById('track');
+  const dots = document.getElementById('dots');
+  const som = document.getElementById('som');
+
+  if (!ITENS.length) {
+    document.body.innerHTML = '<div id="aviso"><b>Pasta vazia</b><span>Coloque as artes na pasta e atualize esta página.</span></div>';
+    return;
+  }
+
+  // Regras reais do carrossel: avança se passar de 28% da largura OU se soltar
+  // acima de 0,35 px/ms. O encaixe desacelera até parar, sem passar do ponto.
+  const D_LIMITE = 0.28;
+  const V_LIMITE = 0.35;
+  const CURVA = 'cubic-bezier(.22,.61,.36,1)';
+
+  let idx = 0, x = 0, arrastando = false, inicioX = 0, amostras = [], somLigado = false;
+  const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+  const larg = () => vp.clientWidth || 1;
+
+  /* ---------- monta os slides ---------- */
+
+  const elementos = [];
+
+  ITENS.forEach((item, i) => {
+    const s = document.createElement('div');
+    s.className = 'slide';
+    let el;
+    if (item.tipo === 'video') {
+      el = document.createElement('video');
+      el.playsInline = true; el.muted = true; el.loop = true;
+      el.autoplay = true;
+      el.preload = 'auto';
+      if (item.poster) el.poster = item.poster;
+      // Sem isso o slide fica preto enquanto não toca. Pedir um instante
+      // qualquer do vídeo obriga o navegador a desenhar o primeiro quadro,
+      // mesmo com ele pausado.
+      el.addEventListener('loadeddata', () => {
+        if (el.paused && !el.currentTime) { try { el.currentTime = 0.05; } catch (_) {} }
+      }, { once: true });
+      el.addEventListener('loadedmetadata', () => { if (i === 0) medirPrimeiro(el.videoWidth, el.videoHeight); }, { once: true });
+    } else {
+      el = document.createElement('img');
+      el.alt = '';
+      el.decoding = 'async';
+      el.addEventListener('load', () => { if (i === 0) medirPrimeiro(el.naturalWidth, el.naturalHeight); }, { once: true });
+    }
+    el.addEventListener('error', () => reclamar(i, item.src), { once: true });
+    el.dataset.src = item.src;
+    elementos.push(el);
+    s.appendChild(el);
+    track.appendChild(s);
+  });
+
+  // Carrega só o slide atual e os vizinhos. Oito PNGs de 1080x1440 somam mais de
+  // 45 MB descomprimidos, e o navegador do celular derruba parte deles.
+  function carregarPerto(centro) {
+    for (let i = centro - 1; i <= centro + 1; i++) {
+      const el = elementos[i];
+      if (el && !el.getAttribute('src')) el.setAttribute('src', el.dataset.src);
+    }
+  }
+
+  // Se algo não carregar, a tela diz o porquê em vez de mostrar ícone quebrado.
+  let jaReclamou = false;
+  async function reclamar(i, src) {
+    if (jaReclamou) return;
+    jaReclamou = true;
+    let detalhe;
+    try {
+      const r = await fetch(src, { cache: 'no-store' });
+      detalhe = 'Servidor respondeu HTTP ' + r.status + ' · ' + (r.headers.get('content-type') || 'sem tipo');
+    } catch (e) {
+      detalhe = 'Não consegui falar com o computador: ' + e.message;
+    }
+    const aviso = document.createElement('div');
+    aviso.id = 'aviso';
+    aviso.innerHTML =
+      '<b>O slide ' + (i + 1) + ' não carregou</b>' +
+      '<span>' + src + '</span>' +
+      '<span>' + detalhe + '</span>' +
+      '<span>Confira se a janela preta no computador continua aberta.</span>';
+    document.body.appendChild(aviso);
+  }
+
+  /* ---------- proporção: o primeiro slide manda ---------- */
+
+  function medirPrimeiro(w, h) {
+    if (PROPORCAO_FIXA) return;
+    if (!w || !h) return;
+    aplicarProporcao(w / h);
+  }
+
+  function aplicarProporcao(r) {
+    // o app aceita de 1.91:1 (paisagem) até 4:5; o 3:4 entrou depois.
+    const rr = clamp(r, 0.75, 1.91);
+    vp.style.aspectRatio = String(rr);
+    ajustarAltura();
+    posicionar(-idx * larg(), 0);
+  }
+
+  // nunca deixa o post passar da tela: se ficar alto demais, limita pela altura
+  function ajustarAltura() {
+    const r = parseFloat(vp.style.aspectRatio || '0.8');
+    const disponivel = window.innerHeight - 56;
+    const alturaCheia = window.innerWidth / r;
+    vp.style.width = alturaCheia > disponivel ? (disponivel * r) + 'px' : '100%';
+  }
+
+  aplicarProporcao(PROPORCAO_FIXA || 0.8);
+
+  /* ---------- posição ---------- */
+
+  function posicionar(px, dur) {
+    x = px;
+    track.style.transition = dur ? `transform ${dur}ms ${CURVA}` : 'none';
+    track.style.transform = `translate3d(${px}px,0,0)`;
+  }
+
+  function posicaoAtual() {
+    const t = getComputedStyle(track).transform;
+    if (!t || t === 'none') return x;
+    const m = t.match(/matrix.*\((.+)\)/);
+    if (!m) return x;
+    const p = m[1].split(', ').map(Number);
+    return p.length === 6 ? p[4] : p[12];
+  }
+
+  function encaixar(alvo, velocidade) {
+    const destino = -alvo * larg();
+    const distancia = Math.abs(destino - x);
+    // desaceleração guiada pela sua velocidade de soltura, sem quicar
+    const v = clamp(Math.abs(velocidade), 0.5, 4);
+    const dur = distancia < 1 ? 0 : clamp(distancia / v, 160, 400);
+    idx = alvo;
+    carregarPerto(idx);
+    posicionar(destino, dur);
+    pintarDots();
+    sincronizarMidia();
+    esconderDots();
+  }
+
+  /* ---------- bolinhas ---------- */
+
+  ITENS.forEach(() => dots.appendChild(document.createElement('span')));
+  if (ITENS.length < 2) dots.style.display = 'none';
+
+  function pintarDots() {
+    const n = ITENS.length;
+    const centro = clamp(idx, 2, Math.max(2, n - 3));
+    [...dots.children].forEach((d, i) => {
+      const dist = Math.abs(i - centro);
+      d.className = (i === idx ? 'ativo ' : '') + (dist > 2 ? 'fora' : (dist === 2 && n > 5 ? 'longe' : ''));
+    });
+    dots.style.transform = `translateX(${(2 - centro) * 11}px)`;
+  }
+
+  let timerDots;
+  function mostrarDots() {
+    if (ITENS.length < 2) return;
+    clearTimeout(timerDots);
+    dots.classList.add('visivel');
+  }
+  function esconderDots() {
+    clearTimeout(timerDots);
+    timerDots = setTimeout(() => dots.classList.remove('visivel'), 1600);
+  }
+
+  /* ---------- vídeo e som ---------- */
+
+  // O navegador pode recusar o autoplay: aba em segundo plano, modo de baixo
+  // consumo do iPhone, economia de dados. Desistir em silêncio deixaria o
+  // slide preto até a pessoa tocar — então aqui insiste assim que puder.
+  let esperandoToque = false;
+
+  function tocar(v) {
+    const p = v.play();
+    if (!p || !p.catch) return;
+    p.catch(() => {
+      const retomar = () => {
+        if (!v.paused) return;
+        v.muted = !somLigado;
+        const q = v.play();
+        if (q && q.catch) q.catch(() => {});
+      };
+      v.addEventListener('canplay', retomar, { once: true });
+      document.addEventListener('visibilitychange', retomar, { once: true });
+      if (!esperandoToque) {
+        esperandoToque = true;
+        // último recurso: o primeiro toque em qualquer lugar destrava
+        document.addEventListener('pointerdown', () => {
+          esperandoToque = false;
+          retomar();
+        }, { once: true });
+      }
+    });
+  }
+
+  function sincronizarMidia() {
+    [...track.children].forEach((s, i) => {
+      const v = s.querySelector('video');
+      if (!v) return;
+      if (i === idx) { v.muted = !somLigado; tocar(v); }
+      else { v.pause(); }
+    });
+    const ehVideo = ITENS[idx].tipo === 'video';
+    som.classList.toggle('visivel', ehVideo);
+    pintarSom();
+  }
+
+  function pintarSom() {
+    som.setAttribute('aria-label', somLigado ? 'Desligar o som' : 'Ligar o som');
+    som.innerHTML = somLigado
+      ? '<svg viewBox="0 0 24 24"><path d="M11 5 6.5 9H3v6h3.5L11 19z"/><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>'
+      : '<svg viewBox="0 0 24 24"><path d="M11 5 6.5 9H3v6h3.5L11 19z"/><path d="M16 9.5l4 5"/><path d="M20 9.5l-4 5"/></svg>';
+  }
+
+  som.addEventListener('click', (e) => {
+    e.stopPropagation();
+    somLigado = !somLigado;
+    sincronizarMidia();
+  });
+
+  /* ---------- arrasto ---------- */
+
+  vp.addEventListener('pointerdown', (e) => {
+    if (ITENS.length < 2) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    x = posicaoAtual();
+    posicionar(x, 0);
+    arrastando = true;
+    inicioX = e.clientX;
+    amostras = [{ t: performance.now(), x: e.clientX }];
+    try { vp.setPointerCapture(e.pointerId); } catch (_) {}
+    vp.classList.add('arrastando');
+    mostrarDots();
+  });
+
+  vp.addEventListener('pointermove', (e) => {
+    if (!arrastando) return;
+    const w = larg();
+    let dx = e.clientX - inicioX;
+    // nas pontas o arrasto fica pesado, como no app
+    if ((idx === 0 && dx > 0) || (idx === ITENS.length - 1 && dx < 0)) dx *= 0.3;
+    posicionar(-idx * w + dx, 0);
+    amostras.push({ t: performance.now(), x: e.clientX });
+    if (amostras.length > 8) amostras.shift();
+  });
+
+  function soltar() {
+    if (!arrastando) return;
+    arrastando = false;
+    vp.classList.remove('arrastando');
+
+    const w = larg();
+    const agora = performance.now();
+    const recentes = amostras.filter(s => agora - s.t < 130);
+    const a = recentes[0] || amostras[0];
+    const b = amostras[amostras.length - 1];
+    const dt = (a && b) ? (b.t - a.t) : 0;
+    const v = dt > 0 ? (b.x - a.x) / dt : 0;
+
+    const deslocamento = x + idx * w;
+    const fracao = deslocamento / w;
+
+    let alvo = idx;
+    if (v <= -V_LIMITE) alvo = idx + 1;
+    else if (v >= V_LIMITE) alvo = idx - 1;
+    else if (fracao <= -D_LIMITE) alvo = idx + 1;
+    else if (fracao >= D_LIMITE) alvo = idx - 1;
+
+    encaixar(clamp(alvo, 0, ITENS.length - 1), v);
+  }
+
+  vp.addEventListener('pointerup', soltar);
+  vp.addEventListener('pointercancel', soltar);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') { mostrarDots(); encaixar(clamp(idx + 1, 0, ITENS.length - 1), 0); }
+    if (e.key === 'ArrowLeft') { mostrarDots(); encaixar(clamp(idx - 1, 0, ITENS.length - 1), 0); }
+  });
+
+  window.addEventListener('resize', () => { ajustarAltura(); posicionar(-idx * larg(), 0); });
+  window.addEventListener('orientationchange', () => setTimeout(() => { ajustarAltura(); posicionar(-idx * larg(), 0); }, 250));
+
+  carregarPerto(0);
+  pintarDots();
+  pintarSom();
+  sincronizarMidia();
+  mostrarDots();
+  esconderDots();
+})();
+</script>
+
+<script>
+(() => {
+  const VERSAO = "7f98852e28c52990";
+  let ocupado = false;
+  async function conferir() {
+    if (ocupado || document.hidden) return;
+    ocupado = true;
+    try {
+      const r = await fetch('versao.txt?t=' + Date.now(), { cache: 'no-store' });
+      if (r.ok) {
+        const nova = (await r.text()).trim();
+        if (nova && nova !== VERSAO && sessionStorage.getItem('carrossel-v') !== nova) {
+          sessionStorage.setItem('carrossel-v', nova);
+          location.replace(location.pathname + '?v=' + encodeURIComponent(nova));
+        }
+      }
+    } catch (e) { /* sem internet agora: tenta de novo depois */ }
+    ocupado = false;
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) conferir(); });
+  window.addEventListener('focus', conferir);
+  setInterval(conferir, 120000);
+})();
+</script>
+</body>
+</html>
