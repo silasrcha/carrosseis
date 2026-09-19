@@ -211,8 +211,10 @@
   }
 
   function aplicarProporcao(r) {
-    // o app aceita de 1.91:1 (paisagem) até 4:5; o 3:4 entrou depois.
-    const rr = clamp(r, 0.75, 1.91);
+    // O feed do Instagram vai de 1.91:1 até 3:4, mas aqui também passam peças
+    // 9:16 (vídeo vertical, card de story). Antes o limite era 3:4 e uma arte
+    // 1080x1920 aparecia recortada como se fosse 1080x1440.
+    const rr = clamp(r, 0.5625, 1.91);
     vp.style.aspectRatio = String(rr);
     ajustarAltura();
     posicionar(-idx * larg(), 0);
