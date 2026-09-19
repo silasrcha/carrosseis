@@ -69,6 +69,11 @@
     pointer-events: none;
   }
   #dots.visivel { opacity: 1; }
+  /* em tela cheia não sobra faixa embaixo: as bolinhas e o som vão por cima
+     da arte, acima da barra de gestos do celular */
+  body.tela-cheia #dots { bottom: calc(18px + env(safe-area-inset-bottom)); }
+  body.tela-cheia #dots span { box-shadow: 0 0 3px rgba(0,0,0,.55); }
+  body.tela-cheia #som { bottom: calc(14px + env(safe-area-inset-bottom)); }
   #dots span {
     width: 6px; height: 6px; border-radius: 50%;
     background: rgba(255,255,255,.42);
@@ -204,31 +209,37 @@
 
   /* ---------- proporção: o primeiro slide manda ---------- */
 
-  function medirPrimeiro(w, h) {
-    if (PROPORCAO_FIXA) return;
-    if (!w || !h) return;
-    aplicarProporcao(w / h);
-  }
+  let razao = PROPORCAO_FIXA || 0.8;
 
-  function aplicarProporcao(r) {
-    // O feed do Instagram vai de 1.91:1 até 3:4, mas aqui também passam peças
-    // 9:16 (vídeo vertical, card de story). Antes o limite era 3:4 e uma arte
-    // 1080x1920 aparecia recortada como se fosse 1080x1440.
-    const rr = clamp(r, 0.5625, 1.91);
-    vp.style.aspectRatio = String(rr);
+  function medirPrimeiro(w, h) {
+    if (PROPORCAO_FIXA || !w || !h) return;
+    razao = w / h;
     ajustarAltura();
     posicionar(-idx * larg(), 0);
   }
 
-  // nunca deixa o post passar da tela: se ficar alto demais, limita pela altura
+  // Sem limite de proporção: a caixa segue a primeira lâmina, de paisagem a
+  // mais alta que 9:16. Peça vertical num celular em pé toma a tela inteira,
+  // como Stories e Reels — a caixa vira o formato da tela e a arte cobre,
+  // aparando o pouco que sobra dos lados. Fora disso (paisagem, computador,
+  // proporção escolhida à mão) a peça aparece inteira, limitada pela altura.
   function ajustarAltura() {
-    const r = parseFloat(vp.style.aspectRatio || '0.8');
-    const disponivel = window.innerHeight - 56;
-    const alturaCheia = window.innerWidth / r;
-    vp.style.width = alturaCheia > disponivel ? (disponivel * r) + 'px' : '100%';
+    const telaW = window.innerWidth, telaH = window.innerHeight;
+    const cheia = !PROPORCAO_FIXA && razao <= 0.6 && telaH > telaW;
+    document.body.classList.toggle('tela-cheia', cheia);
+    if (cheia) {
+      vp.style.aspectRatio = '';
+      vp.style.width = telaW + 'px';
+      vp.style.height = telaH + 'px';
+      return;
+    }
+    vp.style.height = '';
+    vp.style.aspectRatio = String(razao);
+    const disponivel = telaH - 56;
+    vp.style.width = telaW / razao > disponivel ? (disponivel * razao) + 'px' : '100%';
   }
 
-  aplicarProporcao(PROPORCAO_FIXA || 0.8);
+  ajustarAltura();
 
   /* ---------- posição ---------- */
 
